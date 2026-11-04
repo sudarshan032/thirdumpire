@@ -1,0 +1,6 @@
+[project]
+name = "thirdumpire"
+version = "0.1.0"
+description = "DRS for your AI: every change to an AI agent is tested against your rules and approved by a named person in Slack, via Switch."
+requires-python = ">=3.11"
+dependencies = ["pyyaml>=6"]

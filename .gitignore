@@ -1,0 +1,14 @@
+.env
+.env.*
+!.env.example
+node_modules/
+.venv/
+.next/
+.vercel/
+__pycache__/
+.DS_Store
+private/
+runs/cache/
+runs/2026*/
+runs/latest
+*.egg-info/

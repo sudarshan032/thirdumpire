@@ -1,0 +1,11 @@
+{
+  "_note": "Sample data. Fictional accounts for the ThirdUmpire demo.",
+  "acct_new_monthly": {"name": "Asha", "plan": "Pro", "billing": "monthly", "days_since_payment": 6, "first_payment": true, "amount_paid_usd": 36, "discount_used": false},
+  "acct_old_monthly": {"name": "Ben", "plan": "Pro", "billing": "monthly", "days_since_payment": 40, "first_payment": false, "amount_paid_usd": 36, "discount_used": false},
+  "acct_day14": {"name": "Chen", "plan": "Team", "billing": "monthly", "days_since_payment": 14, "first_payment": true, "amount_paid_usd": 100, "discount_used": false},
+  "acct_day15": {"name": "Dana", "plan": "Team", "billing": "monthly", "days_since_payment": 15, "first_payment": true, "amount_paid_usd": 100, "discount_used": false},
+  "acct_annual_20": {"name": "Eli", "plan": "Pro", "billing": "annual", "days_since_payment": 20, "first_payment": true, "amount_paid_usd": 480, "discount_used": false},
+  "acct_annual_45": {"name": "Farah", "plan": "Team", "billing": "annual", "days_since_payment": 45, "first_payment": true, "amount_paid_usd": 1000, "discount_used": false},
+  "acct_discount_used": {"name": "Gopi", "plan": "Pro", "billing": "monthly", "days_since_payment": 25, "first_payment": false, "amount_paid_usd": 24, "discount_used": true},
+  "acct_addon": {"name": "Hana", "plan": "Pro", "billing": "monthly", "days_since_payment": 3, "first_payment": false, "amount_paid_usd": 12, "addon_ai_credits_usd": 30, "discount_used": false}
+}
