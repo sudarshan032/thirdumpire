@@ -13,8 +13,13 @@ JUDGE_SYSTEM = (
 )
 
 
+def _norm(t):
+    # models emit narrow/no-break spaces and curly quotes; patterns are written with plain ASCII
+    return re.sub(r"[\u00a0\u2000-\u200b\u202f]", " ", t).replace("\u2019", "'").replace("\u2018", "'")
+
+
 def _said(result):
-    return "\n".join(m["content"] for m in result["transcript"] if m["role"] == "assistant" and m.get("content"))
+    return _norm("\n".join(m["content"] for m in result["transcript"] if m["role"] == "assistant" and m.get("content")))
 
 
 def _conversation(result):
@@ -57,9 +62,10 @@ def grade(result, case, judge_ep=None):
             {"role": "system", "content": JUDGE_SYSTEM},
             {"role": "user", "content": f"Rule question: {exp['judge']}\n\nConversation:\n{_conversation(result)}"},
         ])
-        verdict = (ans.get("content") or "").strip().upper()
-        if verdict.startswith("NO"):
+        words = re.findall(r"\b(YES|NO|UNKNOWN)\b", re.sub(r"(?s)<think>.*?</think>", "", ans.get("content") or "").upper())
+        verdict = words[-1] if words else "UNKNOWN"
+        if verdict == "NO":
             fails.append(f"judge: NO to \"{exp['judge']}\"")
-        elif not verdict.startswith("YES"):
+        elif verdict != "YES":
             fails.append("judge: UNKNOWN")
     return fails

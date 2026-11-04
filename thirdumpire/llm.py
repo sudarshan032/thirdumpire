@@ -6,6 +6,7 @@ Every call is cached by a hash of its request, so a review can be replayed with 
 import hashlib
 import json
 import os
+import re
 import time
 import urllib.error
 import urllib.request
@@ -48,7 +49,7 @@ def chat(ep, messages, tools=None, temperature=0.0, run=0):
     if os.environ.get("THIRDUMPIRE_OFFLINE") == "1" or not ep["key"]:
         raise Offline(f"no cached answer and no API key for model {ep['model'] or '?'}")
     body = json.dumps(req).encode()
-    for attempt in range(6):
+    for attempt in range(12):
         r = urllib.request.Request(
             ep["base_url"].rstrip("/") + "/chat/completions",
             data=body,
@@ -60,10 +61,12 @@ def chat(ep, messages, tools=None, temperature=0.0, run=0):
             break
         except urllib.error.HTTPError as e:
             # ponytail: fixed backoff on rate limits; free tiers allow ~30 requests/min
-            if e.code in (429, 500, 502, 503) and attempt < 5:
-                time.sleep(4 * (attempt + 1))
+            detail = e.read()
+            if e.code in (429, 500, 502, 503) and attempt < 11:
+                wait = re.search(rb"try again in ([0-9.]+)(ms|s)", detail)
+                time.sleep(float(wait.group(1)) / (1000 if wait.group(2) == b"ms" else 1) + 1 if wait else 5 * (attempt + 1))
                 continue
-            raise RuntimeError(f"{e.code} from {ep['base_url']}: {e.read()[:300]!r}") from e
+            raise RuntimeError(f"{e.code} from {ep['base_url']}: {detail[:300]!r}") from e
     CACHE.mkdir(parents=True, exist_ok=True)
     hit.write_text(json.dumps(msg))
     return msg
