@@ -64,11 +64,15 @@ def review(company="kitebase", k=3, workers=4, cases_filter=None):
             "old_pass": sum(not r["fails"] for r in old), "new_pass": sum(not r["fails"] for r in new), "k": k,
             "old": old, "new": new,
         })
-    regressions = [r for r in rows if r["old_pass"] == k and r["new_pass"] < k]
-    fixes = [r for r in rows if r["old_pass"] < k and r["new_pass"] == k]
-    still = [r for r in rows if r["old_pass"] < k and r["new_pass"] < k]
+    for r in rows:
+        r["errored"] = any(f.startswith("error:") for x in r["old"] + r["new"] for f in x["fails"])
+    rows_ok = [r for r in rows if not r["errored"]]
+    regressions = [r for r in rows_ok if r["old_pass"] == k and r["new_pass"] < k]
+    fixes = [r for r in rows_ok if r["old_pass"] < k and r["new_pass"] == k]
+    still = [r for r in rows_ok if r["old_pass"] < k and r["new_pass"] < k]
     errors = sum(1 for r in rows for x in r["old"] + r["new"] if any(f.startswith("error:") for f in x["fails"]))
-    verdict = "NO RESULT" if errors else ("OUT" if regressions else "NOT OUT")
+    # a proven regression is OUT even if other cases could not run; NOT OUT needs every case to have run
+    verdict = "OUT" if regressions else ("NO RESULT" if errors else "NOT OUT")
 
     diff = "".join(difflib.unified_diff(data["live"].splitlines(True), data["candidate"].splitlines(True), "live/system.md", "candidate/system.md"))
     pack = {
@@ -119,6 +123,8 @@ def card(pack, data):
     titles = {r["id"]: r["title"] for r in data["rules"]["rules"]}
     head = {"OUT": "🔴 *OUT*: this change breaks rules that held before.", "NOT OUT": "🟢 *NOT OUT*: no rule got worse.",
             "NO RESULT": f"⚪ *NO RESULT*: {s['errored_runs']} runs failed to reach a model, so no decision. Re-run the review."}[pack["verdict"]]
+    if pack["verdict"] == "OUT" and s["errored_runs"]:
+        head += f" ({s['errored_runs']} runs could not reach a model; re-run for the full picture.)"
     lines = [
         f"*ThirdUmpire review* · {pack['company']} · {s['cases']} cases × {k} runs, old vs new",
         head,

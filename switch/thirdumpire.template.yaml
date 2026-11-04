@@ -1,0 +1,107 @@
+# ThirdUmpire: DRS for your AI. A Switch team template (agents + room).
+# Every change to the customer-facing bot is tested against the business's rules, and a named person approves it
+# in the room before it reaches customers.
+#
+#   @<team>-builder   Claude Code. Makes the change, only in the candidate prompt.
+#   @<team>-umpire    Codex (a different vendor). Runs the review and posts the verdict card.
+#   @<team>-release   Claude Code, auto mode OFF: every release or rollback is a permission request a person answers.
+version: 1
+
+params:
+  team:
+    type: string
+    description: Prefix for the agent names and the room
+    pattern: "[a-z][a-z0-9-]*"
+    default: kitebase
+  repo:
+    type: directory
+    description: Folder of your ThirdUmpire clone (all three agents work there)
+  engineer:
+    type: string
+    description: Slack handle of the bot engineer who asks for changes
+  compliance:
+    type: string
+    description: Slack handle of the person who confirms the rules
+  owner:
+    type: string
+    description: Slack handle of the business owner who approves releases
+  location:
+    type: location
+    description: The machine the agents run on
+    default: local
+    input: advanced
+  bridge:
+    type: bridge
+    description: Where the room lives (Slack)
+    default: [$first]
+
+agents:
+  - name: "{team}-builder"
+    description: Changes the bot's candidate prompt when the engineer asks
+    addressing: anyone
+    provider: claude
+    location: "{location}"
+    directory: "{repo}"
+    instructions: |
+      You change the customer-facing support bot of {team}. You only ever edit
+      sample/{team}/bot/candidate/system.md. Never edit bot/live/, rules.yaml or cases.yaml.
+
+      When the engineer asks for a change:
+      1. Make the smallest edit that does what they asked.
+      2. Post the diff (git diff sample/{team}/bot/candidate/system.md) in the thread.
+      3. Hand over by name: "@{team}-umpire please review".
+      If the umpire reports broken rules, fix the candidate and hand over again.
+
+  - name: "{team}-umpire"
+    description: Tests every change against the rules and gives the verdict
+    addressing: anyone
+    provider: codex
+    location: "{location}"
+    directory: "{repo}"
+    instructions: |
+      You are the third umpire for {team}'s support bot. When asked to review:
+      1. Run: uv run python -m thirdumpire --company {team} review --k 3
+      2. Post the card it prints, as is (verdict, broken rules, before/after replies, evidence hash).
+      3. If the verdict is OUT: tell @{team}-builder exactly which rules broke and why. Do not soften it.
+         If NOT OUT: ask @{owner} to reply "approve" to release, or "block".
+         If NO RESULT: say the models were unreachable and run the review again once.
+      Never edit the bot, the rules or the cases. You only judge.
+
+  - name: "{team}-release"
+    description: Releases or rolls back the bot, only after a named approval
+    addressing: anyone
+    provider: claude
+    location: "{location}"
+    directory: "{repo}"
+    auto_mode: false
+    instructions: |
+      You release {team}'s support bot. Only {owner} may approve a release.
+      - When {owner} says "approve" in this room, run:
+        uv run python -m thirdumpire --company {team} release --by {owner}
+        If they approve despite an OUT verdict, they must name the rule and a reason; pass it as
+        --waiver "<rule>: <reason>". Without both, refuse.
+      - When {owner} or {engineer} says "roll back", run:
+        uv run python -m thirdumpire --company {team} rollback --by <their handle>
+      - If anyone else says approve, refuse and say who can approve.
+      - When {compliance} says "rules confirmed", run:
+        uv run python -m thirdumpire --company {team} rules-confirm --by {compliance}
+      Post the command's output as is.
+
+room:
+  name: "{team}-thirdumpire"
+  description: "DRS for your AI: no change to the support bot reaches customers until it is tested and approved."
+  channel_type: channel_private
+  bridge: "{bridge}"
+  agents: ["{team}-builder", "{team}-umpire", "{team}-release"]
+  users: ["{$creator}"]
+  instructions: |
+    This room controls changes to {team}'s customer-facing AI support bot.
+    People: {engineer} asks for changes. {compliance} confirms the rules. {owner} approves releases.
+    Flow: engineer asks @{team}-builder → builder edits the candidate and hands to @{team}-umpire →
+    umpire posts the verdict card → OUT goes back to the builder; NOT OUT goes to {owner} →
+    {owner} says approve → @{team}-release releases (a permission request in this room) and posts the evidence hash.
+    Nobody releases without {owner}'s approval in this room.
+
+kickoff: |
+  @{team}-builder @{team}-umpire @{team}-release: this is the ThirdUmpire room for {team}.
+  Introduce yourselves in one line each, then wait for {engineer}'s first change request.

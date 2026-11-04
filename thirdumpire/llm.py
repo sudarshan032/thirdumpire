@@ -49,7 +49,7 @@ def chat(ep, messages, tools=None, temperature=0.0, run=0):
     if os.environ.get("THIRDUMPIRE_OFFLINE") == "1" or not ep["key"]:
         raise Offline(f"no cached answer and no API key for model {ep['model'] or '?'}")
     body = json.dumps(req).encode()
-    for attempt in range(12):
+    for attempt in range(30):
         r = urllib.request.Request(
             ep["base_url"].rstrip("/") + "/chat/completions",
             data=body,
@@ -62,7 +62,7 @@ def chat(ep, messages, tools=None, temperature=0.0, run=0):
         except urllib.error.HTTPError as e:
             # ponytail: fixed backoff on rate limits; free tiers allow ~30 requests/min
             detail = e.read()
-            if e.code in (429, 500, 502, 503) and attempt < 11:
+            if e.code in (429, 500, 502, 503) and attempt < 29:
                 wait = re.search(rb"try again in ([0-9.]+)(ms|s)", detail)
                 time.sleep(float(wait.group(1)) / (1000 if wait.group(2) == b"ms" else 1) + 1 if wait else 5 * (attempt + 1))
                 continue
