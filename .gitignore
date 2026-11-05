@@ -12,3 +12,4 @@ runs/cache/
 runs/2026*/
 runs/latest
 *.egg-info/
+docs/submission/clips/
