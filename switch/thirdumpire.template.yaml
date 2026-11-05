@@ -127,6 +127,34 @@ room:
   bridge: "{bridge}"
   agents: ["{team}-builder", "{team}-umpire", "{team}-rules", "{team}-release"]
   users: ["{$creator}"]
+  roles:
+    - name: release-manager
+      exclusive: true
+      instructions: |
+        The only hat that may put the support bot live or roll it back. Held by {team}-release. Act only on
+        {owner}'s approval in this room, and only through the release / rollback commands.
+    - name: rules-keeper
+      exclusive: true
+      instructions: |
+        Owns sample/{team}/rules.yaml and cases.yaml. Held by {team}-rules. Drafts only; {compliance} confirms.
+  references:
+    - type: github
+      name: "{team} bot and rules"
+      description: The ThirdUmpire repo with the bot prompts, policy, rules, test cases and evidence packs
+      instructions: Read it to answer questions. Change files only as your own agent instructions allow. Never push.
+      value: {urls: ["https://github.com/sudarshan032/thirdumpire"]}
+  docs:
+    - name: How verdicts work
+      description: What each ThirdUmpire card means and who acts next
+      instructions: Read before answering any question about a verdict. Do not edit.
+      content: |
+        🔴 OUT: a rule that held on every run before now fails in at least 2 runs. Goes back to the builder.
+        🟡 NOT TESTED: nothing old broke, but the change adds behaviour no confirmed rule or test covers.
+           {compliance} adds it to policy.md, @{team}-rules drafts the rule and tests, {compliance} confirms.
+        🟢 NOT OUT: every case ran, nothing got worse, every new line is covered. {owner} may approve.
+        ⚪ NO RESULT: some runs could not reach a model. Run again. Never counts as a pass.
+        Release is refused if the review was partial, out of date, already used, or the sign-off does not match
+        the current policy, rules and tests. Every release and rollback is logged in bot/releases.jsonl.
   instructions: |
     This room controls changes to {team}'s customer-facing AI support bot.
     People: {engineer} asks for changes. {compliance} confirms the rules (@{team}-rules). {owner} approves releases.
