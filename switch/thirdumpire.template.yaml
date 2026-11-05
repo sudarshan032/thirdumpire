@@ -3,7 +3,7 @@
 # in the room before it reaches customers.
 #
 #   @<team>-builder   Claude Code. Makes the change, only in the candidate prompt.
-#   @<team>-umpire    Codex (a different vendor). Runs the review and posts the verdict card.
+#   @<team>-umpire    Claude Code. Runs the review and posts the verdict card (it never grades by itself).
 #   @<team>-rules     Claude Code. Drafts the rules from the written policy; only compliance can confirm them.
 #   @<team>-release   Claude Code, auto mode OFF: every release or rollback is a permission request a person answers.
 #
@@ -59,7 +59,7 @@ agents:
   - name: "{team}-umpire"
     description: Tests every change against the rules and gives the verdict
     addressing: anyone
-    provider: codex
+    provider: claude
     location: "{location}"
     directory: "{repo}"
     instructions: |

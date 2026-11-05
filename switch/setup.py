@@ -14,6 +14,7 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -57,6 +58,16 @@ def policy(users, agents=()):
                                   "owner": False, "owner_agents": False, "platform": False}]}}
 
 
+def _channel(room):
+    return (re.findall(r"\b[CG][A-Z0-9]{8,}\b", room.get("external_channel_url") or "") or [None])[-1]
+
+
+def _slack(token, method, body):
+    req = urllib.request.Request(f"https://slack.com/api/{method}", data=json.dumps(body).encode(), headers={
+        "Authorization": f"Bearer {token}", "Content-Type": "application/json"})
+    return json.loads(urllib.request.urlopen(req).read())
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--team", default="kitebase")
@@ -76,9 +87,13 @@ def main():
             sys.exit(f"{h} is not known to Switch's Slack bridge yet. Have them post once in a channel with the bot.")
     eng, comp, own = (people[h] for h in (a.engineer, a.compliance, a.owner))
 
+    token = os.environ.get("SLACK_BOT_TOKEN")
     if a.recreate:
         for r in gw("GET", "/rooms"):
             if r.get("name") == f"{a.team}-thirdumpire":
+                old = _channel(r)
+                if token and old:  # Slack keeps archived channel names, so free the name first
+                    _slack(token, "conversations.rename", {"channel": old, "name": f"{a.team}-thirdumpire-{int(time.time())}"})
                 gw("DELETE", f"/rooms/{r['id']}?retire_channel=true")
         for n in names:
             gw("DELETE", f"/agents/by-name/{n}", ok=(200, 404))
@@ -95,14 +110,9 @@ def main():
     gw("PUT", f"/agents/{rel}/addressing-policy", policy([own["id"]]))      # owner only: releases need the owner
     print(f"Room {a.team}-thirdumpire ready. Locked: builder/umpire={a.engineer}, rules={a.compliance}, release={a.owner}.")
 
-    token = os.environ.get("SLACK_BOT_TOKEN")
-    url = next(x["external_channel_url"] or "" for x in gw("GET", "/rooms") if x["name"] == f"{a.team}-thirdumpire")
-    channel = (re.findall(r"\b[CG][A-Z0-9]{8,}\b", url) or [None])[-1]
+    channel = next(_channel(x) for x in gw("GET", "/rooms") if x["name"] == f"{a.team}-thirdumpire")
     if token and channel:
-        body = json.dumps({"channel": channel, "users": ",".join(x["external_user_id"] for x in (eng, comp, own))}).encode()
-        req = urllib.request.Request("https://slack.com/api/conversations.invite", data=body, headers={
-            "Authorization": f"Bearer {token}", "Content-Type": "application/json"})
-        res = json.loads(urllib.request.urlopen(req).read())
+        res = _slack(token, "conversations.invite", {"channel": channel, "users": ",".join(x["external_user_id"] for x in (eng, comp, own))})
         print("Invited the three people to the channel." if res.get("ok") else f"Slack invite: {res.get('error')} {res.get('errors', '')}")
     else:
         print("Invite the engineer, compliance and owner to the Slack channel by hand.")
