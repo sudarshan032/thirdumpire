@@ -98,7 +98,8 @@ def main():
         for n in names:
             gw("DELETE", f"/agents/by-name/{n}", ok=(200, 404))
 
-    t = (ROOT / "switch/thirdumpire.template.yaml").read_text()
+    # no kickoff at creation: agents would be greeted before their locks exist. They wait for the first @mention.
+    t = (ROOT / "switch/thirdumpire.template.yaml").read_text().split("\nkickoff:")[0] + "\n"
     gw("POST", "/rooms/from-template-document", {"template": t, "template_name": "thirdumpire", "inputs": {
         "team": a.team, "repo": str(ROOT), "engineer": a.engineer, "compliance": a.compliance, "owner": a.owner}})
 
@@ -108,7 +109,8 @@ def main():
     gw("PUT", f"/agents/{u}/addressing-policy", policy([eng["id"]], [b, r]))   # engineer; builder and rules hand over
     gw("PUT", f"/agents/{r}/addressing-policy", policy([comp["id"]]))       # compliance only
     gw("PUT", f"/agents/{rel}/addressing-policy", policy([own["id"]]))      # owner only: releases need the owner
-    print(f"Room {a.team}-thirdumpire ready. Locked: builder/umpire={a.engineer}, rules={a.compliance}, release={a.owner}.")
+    print(f"Room {a.team}-thirdumpire ready. Locked: builder/umpire={a.engineer}, rules={a.compliance}, release={a.owner}. "
+          f"Start with: @{a.team}-builder <your change>")
 
     channel = next(_channel(x) for x in gw("GET", "/rooms") if x["name"] == f"{a.team}-thirdumpire")
     if token and channel:

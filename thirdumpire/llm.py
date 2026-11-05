@@ -3,6 +3,8 @@
 Every call is cached by a hash of its request, so a review can be replayed with no AI at all
 (`THIRDUMPIRE_OFFLINE=1`): that is the AI-off fallback for the demo and for judges.
 """
+import functools
+import gzip
 import hashlib
 import json
 import os
@@ -38,6 +40,15 @@ class Offline(Exception):
     pass
 
 
+@functools.cache
+def replay():
+    """Recorded answers committed with the sample data (sample/*/replay.json.gz), so a fresh clone replays with no keys."""
+    out = {}
+    for f in sorted(ROOT.glob("sample/*/replay.json.gz")):
+        out.update(json.loads(gzip.decompress(f.read_bytes())))
+    return out
+
+
 def chat(ep, messages, tools=None, temperature=0.0, run=0):
     req = {"model": ep["model"], "messages": messages, "temperature": temperature}
     if tools:
@@ -46,6 +57,8 @@ def chat(ep, messages, tools=None, temperature=0.0, run=0):
     hit = CACHE / f"{key}.json"
     if hit.exists():
         return json.loads(hit.read_text())
+    if key in replay():
+        return replay()[key]
     if os.environ.get("THIRDUMPIRE_OFFLINE") == "1" or not ep["key"]:
         raise Offline(f"no cached answer and no API key for model {ep['model'] or '?'}")
     body = json.dumps(req).encode()

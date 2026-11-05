@@ -28,10 +28,36 @@ def _latest():
     return d, json.loads((d / "evidence.json").read_text())
 
 
+def _sha(text):
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
 def _rules_sha(rules, company):
-    # compliance signs the rules AND their test cases: nobody can weaken a test without a new sign-off
-    cases = (ROOT / "sample" / company / "cases.yaml").read_text()
-    return hashlib.sha256((json.dumps(rules["rules"], sort_keys=True) + cases).encode()).hexdigest()
+    # compliance signs the policy, the rules AND their test cases: nobody can change one without a new sign-off
+    d = ROOT / "sample" / company
+    return _sha((d / "policy.md").read_text() + json.dumps(rules["rules"], sort_keys=True) + (d / "cases.yaml").read_text())
+
+
+def _log(company, **entry):
+    # every release and rollback, in order, never rewritten: who, when, from which live version to which
+    with (_bot(company) / "releases.jsonl").open("a") as f:
+        f.write(json.dumps({"at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), **entry}) + "\n")
+
+
+def _stale(pack, company):
+    """Why this review can't be released (None if it can)."""
+    d = ROOT / "sample" / company
+    s, c = pack.get("summary", {}), pack["change"]
+    total = len(yaml.safe_load((d / "cases.yaml").read_text())["cases"])
+    if s.get("cases") != total or pack.get("k", 0) < 3:
+        return f"the last review was partial ({s.get('cases')} of {total} cases, {pack.get('k')} runs). Run a full review (k ≥ 3)."
+    if c.get("live_sha256") != _sha((d / "bot/live/system.md").read_text()):
+        return "the live bot changed after the last review, so old vs new is out of date. Run a new review."
+    if c.get("cases_sha256") != _sha((d / "cases.yaml").read_text()):
+        return "the test cases changed after the last review. Run a new review."
+    if any(a.get("role") == "release" for a in pack.get("approvals", [])):
+        return "this review was already released once (a rolled-back change needs a new review)."
+    return None
 
 
 def main(argv=None):
@@ -66,8 +92,15 @@ def main(argv=None):
         if ok.get("rules_sha256") != _rules_sha(rules, a.company):
             print("Refused: compliance has not confirmed the current rules and tests. Ask @" + a.company + "-rules.")
             return 2
-        if hashlib.sha256(cand.encode()).hexdigest() != pack["change"]["candidate_sha256"]:
+        if _sha(cand) != pack["change"]["candidate_sha256"]:
             print("Refused: the candidate changed after the last review. Run a new review first.")
+            return 2
+        why = _stale(pack, a.company)
+        if why:
+            print("Refused: " + why)
+            return 2
+        if pack["summary"].get("live_tampered") and not a.waiver:
+            print("Refused: live was changed outside ThirdUmpire. Roll back, or approve with --waiver \"LIVE: <reason>\".")
             return 2
         if pack["verdict"] == "NO RESULT":
             print("Refused: the last review has no result (model errors). Run it again.")
@@ -84,8 +117,11 @@ def main(argv=None):
         n = len(hist) + 1
         shutil.copy(bot / "live/system.md", bot / f"history/v{n}.md")
         shutil.copy(bot / "candidate/system.md", bot / "live/system.md")
-        pack["approvals"].append({"role": "release", "by": a.by, "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "waiver": a.waiver or None, "previous_live": f"history/v{n}.md"})
+        pack["approvals"].append({"role": "release", "by": a.by, "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "waiver": a.waiver or None,
+                                  "previous_live": f"history/v{n}.md", "live_sha256": _sha(cand)})
         save_pack(run_dir, pack)
+        (bot / "live.sha256").write_text(_sha(cand) + "\n")
+        _log(a.company, action="release", by=a.by, waiver=a.waiver or None, live_sha256=_sha(cand), evidence=pack["sha256"], previous=f"history/v{n}.md")
         print(f"Released. Approved by {a.by}{' with waiver: ' + a.waiver if a.waiver else ''}. Previous version saved as history/v{n}.md. Evidence sha256 {pack['sha256'][:16]}…")
         return 0
 
@@ -95,9 +131,14 @@ def main(argv=None):
         if not hist:
             print("Nothing to roll back to.")
             return 2
+        bad = (bot / "live/system.md").read_text()
+        (bot / f"history/rolled-back-{time.strftime('%Y%m%d-%H%M%S')}.md").write_text(bad)  # keep what was taken down
         shutil.copy(hist[-1], bot / "live/system.md")
         hist[-1].unlink()
-        print(f"Rolled back to {hist[-1].name}, by {a.by}.")
+        good = (bot / "live/system.md").read_text()
+        (bot / "live.sha256").write_text(_sha(good) + "\n")
+        _log(a.company, action="rollback", by=a.by, from_sha256=_sha(bad), live_sha256=_sha(good), restored=hist[-1].name)
+        print(f"Rolled back to {hist[-1].name}, by {a.by}. Logged in bot/releases.jsonl.")
         return 0
 
     if a.cmd == "rules-confirm":

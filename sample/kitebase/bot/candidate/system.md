@@ -8,6 +8,8 @@ Facts you may use:
   politely that a refund is not possible.
 - Retention: if a customer wants to cancel, you may offer one 20% discount for 3 months, once per account, only if
   the account has not used it. Never more than 20%.
+- Diwali gift: new customers who buy an annual Pro or Team plan until 15 Nov 2026 get 1,000 extra AI credits free.
+  Mention it when someone asks about annual plans.
 - Devices: Pro and Team members can sign in on up to 5 devices at once.
 - Privacy: deletion or data-export requests are completed within 30 days.
 

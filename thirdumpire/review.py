@@ -126,6 +126,9 @@ def review(company="kitebase", k=3, workers=4, cases_filter=None):
     except Exception as e:
         untested, errors = [], errors + 1
         print(f"coverage check failed: {e}")
+    # live must be exactly what the last approved release put there; anything else was changed outside the gate
+    pin = data["dir"] / "bot/live.sha256"
+    tampered = pin.exists() and pin.read_text().strip() != hashlib.sha256(data["live"].encode()).hexdigest()
     # a proven regression is OUT even if other cases could not run; NOT OUT needs every case to have run
     verdict = "OUT" if regressions else ("NO RESULT" if errors else ("NOT TESTED" if untested else "NOT OUT"))
 
@@ -136,6 +139,7 @@ def review(company="kitebase", k=3, workers=4, cases_filter=None):
         "change": {
             "live_sha256": hashlib.sha256(data["live"].encode()).hexdigest(),
             "candidate_sha256": hashlib.sha256(data["candidate"].encode()).hexdigest(),
+            "cases_sha256": hashlib.sha256((data["dir"] / "cases.yaml").read_text().encode()).hexdigest(),
             "diff": diff,
         },
         "rules": {"version": data["rules"]["version"], "confirmed_by": data["rules"].get("confirmed_by")},
@@ -146,7 +150,7 @@ def review(company="kitebase", k=3, workers=4, cases_filter=None):
             "failing_in_both": [r["case"] for r in still], "slipped_once": [r["case"] for r in flaky],
             "new_holds": sum(r["new_pass"] == r["k"] for r in rows), "old_holds": sum(r["old_pass"] == r["k"] for r in rows),
             "paired_p": round(mcnemar_p(len(regressions), len(fixes)), 4), "errored_runs": errors,
-            "untested": untested,
+            "untested": untested, "live_tampered": tampered,
         },
         "verdict": verdict,
         "results": rows,
@@ -183,6 +187,7 @@ def card(pack, data):
         head += f" ({s['errored_runs']} runs could not reach a model; re-run for the full picture.)"
     lines = [
         f"*ThirdUmpire review* · {pack['company']} · {s['cases']} cases × {k} runs, old vs new",
+        *(["🚨 *Live was changed outside ThirdUmpire*: it is not the version the owner last approved."] if s.get("live_tampered") else []),
         head,
         f"Holds every run: old {s['old_holds']}/{s['cases']} → new {s['new_holds']}/{s['cases']} · paired p={s['paired_p']}",
     ]

@@ -7,6 +7,16 @@
       "Bash(uv run python -m thirdumpire release:*)",
       "Bash(uv run python -m thirdumpire rollback:*)",
       "Bash(uv run python -m thirdumpire rules-confirm:*)"
+    ],
+    "deny": [
+      "Edit(/sample/*/bot/live/**)",
+      "Write(/sample/*/bot/live/**)",
+      "Edit(/sample/*/bot/live.sha256)",
+      "Write(/sample/*/bot/live.sha256)",
+      "Edit(/sample/*/bot/releases.jsonl)",
+      "Write(/sample/*/bot/releases.jsonl)",
+      "Edit(/sample/*/policy.md)",
+      "Write(/sample/*/policy.md)"
     ]
   }
 }

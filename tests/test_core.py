@@ -101,54 +101,110 @@ class ReviewLoop(unittest.TestCase):
 
 
 class ReleaseGate(unittest.TestCase):
-    def test_release_needs_confirmed_rules_and_matching_candidate(self):
-        import hashlib, io, json, shutil
-        from contextlib import redirect_stdout
+    def setUp(self):
+        import shutil
         from thirdumpire import __main__ as cli
-        root = Path(tempfile.mkdtemp())
-        shutil.copytree(Path(cli.ROOT) / "sample/kitebase", root / "sample/kitebase")
-        (root / "sample/kitebase/bot/history").mkdir(exist_ok=True)
-        rules = root / "sample/kitebase/rules.yaml"
+        self.cli, self.root = cli, Path(tempfile.mkdtemp())
+        shutil.copytree(Path(cli.ROOT) / "sample/kitebase", self.root / "sample/kitebase")
+        self.d = self.root / "sample/kitebase"
+        for f in ("bot/live.sha256", "bot/releases.jsonl"):
+            (self.d / f).unlink(missing_ok=True)
+        shutil.rmtree(self.d / "bot/history", ignore_errors=True)
+
+    def pack(self, verdict="NOT OUT", **over):
+        """A full, fresh review of the current files, as the gate expects."""
+        sha = lambda f: self.cli._sha((self.d / f).read_text())
+        p = {"verdict": verdict, "approvals": [], "k": 3, "summary": {"cases": 40},
+             "change": {"candidate_sha256": sha("bot/candidate/system.md"), "live_sha256": sha("bot/live/system.md"),
+                        "cases_sha256": sha("cases.yaml")}}
+        p.update(over)
+        self.run_dir = self.root / "runs/r1"
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        review.save_pack(self.run_dir, p)
+        (self.root / "runs/latest").write_text("r1")
+
+    def main(self, *argv):
+        import io
+        from contextlib import redirect_stdout
+        with mock.patch.object(self.cli, "ROOT", self.root), redirect_stdout(io.StringIO()) as out:
+            code = self.cli.main(list(argv))
+        self.out = out.getvalue()
+        return code
+
+    def test_release_needs_confirmed_rules_and_matching_candidate(self):
+        import json
+        rules = self.d / "rules.yaml"
         rules.write_text(rules.read_text().replace(rules.read_text().split("confirmed_by:")[1].split("\n")[0], " null"))
-        cand = (root / "sample/kitebase/bot/candidate/system.md").read_text()
-        run_dir = root / "runs/r1"
-        run_dir.mkdir(parents=True)
-        review.save_pack(run_dir, {"verdict": "NOT OUT", "approvals": [],
-                                   "change": {"candidate_sha256": hashlib.sha256(cand.encode()).hexdigest()}})
-        (root / "runs/latest").write_text("r1")
-        with mock.patch.object(cli, "ROOT", root), redirect_stdout(io.StringIO()) as out:
-            self.assertEqual(cli.main(["release", "--by", "owner"]), 2)       # rules not confirmed
-            self.assertIn("not confirmed", out.getvalue())
-            self.assertEqual(cli.main(["rules-confirm", "--by", "compliance"]), 0)
-            rules.write_text(rules.read_text().replace("R1", "R1x", 1))       # rules edited after the sign-off
-            self.assertEqual(cli.main(["release", "--by", "owner"]), 2)
-            rules.write_text(rules.read_text().replace("R1x", "R1", 1))
-            self.assertEqual(cli.main(["release", "--by", "owner"]), 0)
-            (root / "sample/kitebase/bot/candidate/system.md").write_text(cand + "\nchanged")
-            self.assertEqual(cli.main(["release", "--by", "owner"]), 2)       # candidate changed after review
-        self.assertEqual(json.loads((run_dir / "evidence.json").read_text())["approvals"][0]["by"], "owner")
+        self.pack()
+        self.assertEqual(self.main("release", "--by", "owner"), 2)        # rules not confirmed
+        self.assertIn("not confirmed", self.out)
+        self.assertEqual(self.main("rules-confirm", "--by", "compliance"), 0)
+        rules.write_text(rules.read_text().replace("R1", "R1x", 1))       # rules edited after the sign-off
+        self.assertEqual(self.main("release", "--by", "owner"), 2)
+        rules.write_text(rules.read_text().replace("R1x", "R1", 1))
+        cand = (self.d / "bot/candidate/system.md").read_text()
+        (self.d / "bot/candidate/system.md").write_text(cand + "\nchanged")
+        self.assertEqual(self.main("release", "--by", "owner"), 2)        # candidate changed after review
+        (self.d / "bot/candidate/system.md").write_text(cand)
+        self.assertEqual(self.main("release", "--by", "owner"), 0)
+        self.assertEqual(json.loads((self.run_dir / "evidence.json").read_text())["approvals"][0]["by"], "owner")
+
+    def test_policy_edit_needs_a_new_sign_off(self):
+        self.pack()
+        self.assertEqual(self.main("rules-confirm", "--by", "compliance"), 0)
+        (self.d / "policy.md").write_text((self.d / "policy.md").read_text() + "\nNew: 50% off for everyone.")
+        self.assertEqual(self.main("release", "--by", "owner"), 2)
+        self.assertIn("not confirmed", self.out)
 
     def test_not_tested_needs_a_waiver_and_cases_are_signed(self):
-        import hashlib, io, shutil
-        from contextlib import redirect_stdout
-        from thirdumpire import __main__ as cli
-        root = Path(tempfile.mkdtemp())
-        shutil.copytree(Path(cli.ROOT) / "sample/kitebase", root / "sample/kitebase")
-        cand = (root / "sample/kitebase/bot/candidate/system.md").read_text()
-        run_dir = root / "runs/r1"
-        run_dir.mkdir(parents=True)
-        review.save_pack(run_dir, {"verdict": "NOT TESTED", "approvals": [],
-                                   "change": {"candidate_sha256": hashlib.sha256(cand.encode()).hexdigest()}})
-        (root / "runs/latest").write_text("r1")
-        cases = root / "sample/kitebase/cases.yaml"
-        with mock.patch.object(cli, "ROOT", root), redirect_stdout(io.StringIO()) as out:
-            self.assertEqual(cli.main(["rules-confirm", "--by", "compliance"]), 0)
-            self.assertEqual(cli.main(["release", "--by", "owner"]), 2)                  # NOT TESTED, no waiver
-            self.assertIn("NOT TESTED", out.getvalue())
-            cases.write_text(cases.read_text().replace("R1-comply", "R1-comply-x", 1))   # a test edited after sign-off
-            self.assertEqual(cli.main(["release", "--by", "owner", "--waiver", "NEW: tested by hand"]), 2)
-            cases.write_text(cases.read_text().replace("R1-comply-x", "R1-comply", 1))
-            self.assertEqual(cli.main(["release", "--by", "owner", "--waiver", "NEW: tested by hand"]), 0)
+        self.pack("NOT TESTED")
+        cases = self.d / "cases.yaml"
+        self.assertEqual(self.main("rules-confirm", "--by", "compliance"), 0)
+        self.assertEqual(self.main("release", "--by", "owner"), 2)                  # NOT TESTED, no waiver
+        self.assertIn("NOT TESTED", self.out)
+        cases.write_text(cases.read_text().replace("R1-comply", "R1-comply-x", 1))   # a test edited after sign-off
+        self.assertEqual(self.main("release", "--by", "owner", "--waiver", "NEW: tested by hand"), 2)
+        cases.write_text(cases.read_text().replace("R1-comply-x", "R1-comply", 1))
+        self.assertEqual(self.main("release", "--by", "owner", "--waiver", "NEW: tested by hand"), 0)
+
+    def test_partial_or_stale_reviews_are_refused(self):
+        self.main("rules-confirm", "--by", "compliance")
+        self.pack(summary={"cases": 2})                                   # --cases R2-break: a slice, not the suite
+        self.assertEqual(self.main("release", "--by", "owner"), 2)
+        self.assertIn("partial", self.out)
+        self.pack(k=1)
+        self.assertEqual(self.main("release", "--by", "owner"), 2)
+        self.pack()
+        (self.d / "bot/live/system.md").write_text("someone else's release")  # live moved since the review
+        self.assertEqual(self.main("release", "--by", "owner"), 2)
+        self.assertIn("live bot changed", self.out)
+
+    def test_rollback_is_logged_and_the_same_review_cannot_ship_twice(self):
+        import json
+        self.main("rules-confirm", "--by", "compliance")
+        old = (self.d / "bot/live/system.md").read_text()
+        (self.d / "bot/candidate/system.md").write_text(old + "\n- New line.")
+        self.pack()
+        self.assertEqual(self.main("release", "--by", "owner"), 0)
+        self.assertEqual(self.main("rollback", "--by", "owner"), 0)
+        self.assertEqual((self.d / "bot/live/system.md").read_text(), old)
+        log = [json.loads(l) for l in (self.d / "bot/releases.jsonl").read_text().splitlines()]
+        self.assertEqual([(e["action"], e["by"]) for e in log], [("release", "owner"), ("rollback", "owner")])
+        self.assertTrue(list((self.d / "bot/history").glob("rolled-back-*.md")))      # what was taken down is kept
+        self.assertEqual(self.main("release", "--by", "owner"), 2)                    # same review, already used
+        self.assertIn("already released", self.out)
+
+    def test_live_changed_outside_the_gate_shows_on_the_card(self):
+        data = review.load("kitebase")
+        data["dir"] = self.d
+        (self.d / "bot/live.sha256").write_text("0" * 64)
+        with mock.patch.object(bot, "chat", return_value={"content": "Sorry, no refund is possible."}), \
+                mock.patch.object(grade, "chat", return_value={"content": "YES"}), \
+                mock.patch.object(review, "chat", return_value={"content": ""}), \
+                mock.patch.object(review, "load", return_value=data), mock.patch.object(review, "ROOT", self.root):
+            run_dir, pack = review.review("kitebase", k=1, cases_filter={"R2-break"})
+        self.assertTrue(pack["summary"]["live_tampered"])
+        self.assertIn("Live was changed outside ThirdUmpire", (run_dir / "card.md").read_text())
 
 
 if __name__ == "__main__":
