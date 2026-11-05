@@ -8,7 +8,7 @@
 
 **Who it's for:** small teams and AI agencies that run a support or sales bot and change its prompt every week, with no ML team to check it.
 
-![Verdict card in the Slack room: 🔴 OUT, the 40% Diwali offer breaks the 20% discount rule](docs/submission/img/01-out-card.png)
+![Verdict card in the Slack room: 🔴 OUT, the 40% Diwali offer breaks the 20% discount rule](assets/01-out-card.png)
 
 ## Proof
 
@@ -46,7 +46,7 @@ flowchart LR
 
 | 🟡 NOT TESTED: a new feature no rule covers | 🛑 Switch refuses the engineer's "Allow" on a release |
 |---|---|
-| ![NOT TESTED card](docs/submission/img/02-not-tested-card.png) | ![NOT_AUTHORIZED refusal](docs/submission/img/03-not-authorized.png) |
+| ![NOT TESTED card](assets/02-not-tested-card.png) | ![NOT_AUTHORIZED refusal](assets/03-not-authorized.png) |
 
 Four verdicts, like cricket's third umpire:
 
@@ -65,7 +65,7 @@ Four verdicts, like cricket's third umpire:
 - the review was never released before, so a rolled-back change can't go live again without a new review;
 - compliance's sign-off fingerprint matches the current `policy.md` + `rules.yaml` + `cases.yaml` (nobody can quietly weaken a test).
 
-**The record stays honest.** Every release stores the fingerprint of what went live. Each review checks that live still matches the last approved release, and the card shows 🚨 if live was changed outside ThirdUmpire. Rollback is recorded in the evidence pack (who, when, from, to), and old versions are kept in history. Project deny rules in `.claude/settings.json` stop agents editing `bot/live/`, `policy.md`, `rules.yaml` and `cases.yaml`; the builder only edits the candidate prompt.
+**The record stays honest.** Every release stores the fingerprint of what went live. Each review checks that live still matches the last approved release, and the card shows 🚨 if live was changed outside ThirdUmpire. Every release and rollback is appended to `bot/releases.jsonl` (who, when, from which version to which), and the version taken down is kept in history. Project deny rules in `.claude/settings.json` stop agents editing `bot/live/`, its fingerprint, the release log and `policy.md` (a person owns the policy). `rules.yaml` and `cases.yaml` are drafted by @rules, so any edit to them by anyone voids compliance's sign-off until compliance confirms again.
 
 ## Run it
 
