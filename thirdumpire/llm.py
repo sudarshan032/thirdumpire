@@ -29,6 +29,7 @@ def load_env(path=ROOT / ".env"):
 def endpoint(role):
     """role is BOT or JUDGE. Each points at its own vendor."""
     load_env()
+    load_env(ROOT / ".env.example")  # same models by default, so a fresh clone matches the recorded replay
     return {
         "base_url": os.environ.get(f"{role}_BASE_URL", ""),
         "key": os.environ.get(f"{role}_API_KEY", ""),
