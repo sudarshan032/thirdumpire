@@ -66,3 +66,32 @@ class ReviewLoop(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReleaseGate(unittest.TestCase):
+    def test_release_needs_confirmed_rules_and_matching_candidate(self):
+        import hashlib, io, json, shutil
+        from contextlib import redirect_stdout
+        from thirdumpire import __main__ as cli
+        root = Path(tempfile.mkdtemp())
+        shutil.copytree(Path(cli.ROOT) / "sample/kitebase", root / "sample/kitebase")
+        (root / "sample/kitebase/bot/history").mkdir(exist_ok=True)
+        rules = root / "sample/kitebase/rules.yaml"
+        rules.write_text(rules.read_text().replace(rules.read_text().split("confirmed_by:")[1].split("\n")[0], " null"))
+        cand = (root / "sample/kitebase/bot/candidate/system.md").read_text()
+        run_dir = root / "runs/r1"
+        run_dir.mkdir(parents=True)
+        review.save_pack(run_dir, {"verdict": "NOT OUT", "approvals": [],
+                                   "change": {"candidate_sha256": hashlib.sha256(cand.encode()).hexdigest()}})
+        (root / "runs/latest").write_text("r1")
+        with mock.patch.object(cli, "ROOT", root), redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(cli.main(["release", "--by", "owner"]), 2)       # rules not confirmed
+            self.assertIn("not confirmed", out.getvalue())
+            self.assertEqual(cli.main(["rules-confirm", "--by", "compliance"]), 0)
+            rules.write_text(rules.read_text().replace("R1", "R1x", 1))       # rules edited after the sign-off
+            self.assertEqual(cli.main(["release", "--by", "owner"]), 2)
+            rules.write_text(rules.read_text().replace("R1x", "R1", 1))
+            self.assertEqual(cli.main(["release", "--by", "owner"]), 0)
+            (root / "sample/kitebase/bot/candidate/system.md").write_text(cand + "\nchanged")
+            self.assertEqual(cli.main(["release", "--by", "owner"]), 2)       # candidate changed after review
+        self.assertEqual(json.loads((run_dir / "evidence.json").read_text())["approvals"][0]["by"], "owner")

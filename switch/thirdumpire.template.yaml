@@ -4,7 +4,11 @@
 #
 #   @<team>-builder   Claude Code. Makes the change, only in the candidate prompt.
 #   @<team>-umpire    Codex (a different vendor). Runs the review and posts the verdict card.
+#   @<team>-rules     Claude Code. Drafts the rules from the written policy; only compliance can confirm them.
 #   @<team>-release   Claude Code, auto mode OFF: every release or rollback is a permission request a person answers.
+#
+# Who may talk to (and answer the approval buttons of) each agent is locked by switch/setup.py with Switch
+# addressing policies: builder+umpire = engineer, rules = compliance, release = owner only.
 version: 1
 
 params:
@@ -80,28 +84,44 @@ agents:
         uv run python -m thirdumpire --company {team} release --by {owner}
         If they approve despite an OUT verdict, they must name the rule and a reason; pass it as
         --waiver "<rule>: <reason>". Without both, refuse.
-      - When {owner} or {engineer} says "roll back", run:
-        uv run python -m thirdumpire --company {team} rollback --by <their handle>
-      - If anyone else says approve, refuse and say who can approve.
+      - When {owner} says "roll back", run:
+        uv run python -m thirdumpire --company {team} rollback --by {owner}
+      Switch only lets {owner} talk to you and answer your permission requests, so every release in
+      this room carries {owner}'s name in Switch's own record.
+      Post the command's output as is.
+
+  - name: "{team}-rules"
+    description: Turns the written policy into testable rules; compliance confirms them
+    addressing: anyone
+    provider: claude
+    location: "{location}"
+    directory: "{repo}"
+    auto_mode: false
+    instructions: |
+      You keep sample/{team}/rules.yaml in line with sample/{team}/policy.md. Only {compliance} talks to you.
+      - When asked to check or draft rules: read policy.md and rules.yaml. For every policy line that no
+        rule covers, or any rule whose quote no longer matches the policy, propose an edit to rules.yaml
+        (each rule quotes the exact policy sentence it comes from). Make the edit, post the diff.
       - When {compliance} says "rules confirmed", run:
         uv run python -m thirdumpire --company {team} rules-confirm --by {compliance}
-      Post the command's output as is.
+        and post the output as is. Releases are refused until the current rules are confirmed.
+      Never edit the bot, the cases, or bot/live/.
 
 room:
   name: "{team}-thirdumpire"
   description: "DRS for your AI: no change to the support bot reaches customers until it is tested and approved."
   channel_type: channel_private
   bridge: "{bridge}"
-  agents: ["{team}-builder", "{team}-umpire", "{team}-release"]
+  agents: ["{team}-builder", "{team}-umpire", "{team}-rules", "{team}-release"]
   users: ["{$creator}"]
   instructions: |
     This room controls changes to {team}'s customer-facing AI support bot.
-    People: {engineer} asks for changes. {compliance} confirms the rules. {owner} approves releases.
+    People: {engineer} asks for changes. {compliance} confirms the rules (@{team}-rules). {owner} approves releases.
     Flow: engineer asks @{team}-builder → builder edits the candidate and hands to @{team}-umpire →
     umpire posts the verdict card → OUT goes back to the builder; NOT OUT goes to {owner} →
     {owner} says approve → @{team}-release releases (a permission request in this room) and posts the evidence hash.
     Nobody releases without {owner}'s approval in this room.
 
 kickoff: |
-  @{team}-builder @{team}-umpire @{team}-release: this is the ThirdUmpire room for {team}.
+  @{team}-builder @{team}-umpire @{team}-rules @{team}-release: this is the ThirdUmpire room for {team}.
   Introduce yourselves in one line each, then wait for {engineer}'s first change request.

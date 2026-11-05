@@ -6,6 +6,7 @@
   python -m thirdumpire rules-confirm --by <name>
 """
 import argparse
+import hashlib
 import json
 import shutil
 import sys
@@ -25,6 +26,10 @@ def _latest():
     name = (ROOT / "runs" / "latest").read_text().strip()
     d = ROOT / "runs" / name
     return d, json.loads((d / "evidence.json").read_text())
+
+
+def _rules_sha(rules):
+    return hashlib.sha256(json.dumps(rules["rules"], sort_keys=True).encode()).hexdigest()
 
 
 def main(argv=None):
@@ -54,7 +59,11 @@ def main(argv=None):
         run_dir, pack = _latest()
         bot = _bot(a.company)
         cand = (bot / "candidate/system.md").read_text()
-        import hashlib
+        rules = yaml.safe_load((ROOT / "sample" / a.company / "rules.yaml").read_text())
+        ok = rules.get("confirmed_by") or {}
+        if ok.get("rules_sha256") != _rules_sha(rules):
+            print("Refused: compliance has not confirmed the current rules. Ask @" + a.company + "-rules.")
+            return 2
         if hashlib.sha256(cand.encode()).hexdigest() != pack["change"]["candidate_sha256"]:
             print("Refused: the candidate changed after the last review. Run a new review first.")
             return 2
@@ -88,7 +97,7 @@ def main(argv=None):
         f = ROOT / "sample" / a.company / "rules.yaml"
         text = f.read_text()
         data = yaml.safe_load(text)
-        data["confirmed_by"] = {"by": a.by, "at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
+        data["confirmed_by"] = {"by": a.by, "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "rules_sha256": _rules_sha(data)}
         f.write_text(text.split("rules:", 1)[0].rsplit("confirmed_by:", 1)[0] + "confirmed_by: " + json.dumps(data["confirmed_by"]) + "\nrules:" + text.split("rules:", 1)[1])
         print(f"Rules v{data['version']} confirmed by {a.by}.")
         return 0
