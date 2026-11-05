@@ -4,11 +4,13 @@
 #
 #   @<team>-builder   Claude Code. Makes the change, only in the candidate prompt.
 #   @<team>-umpire    Claude Code. Runs the review and posts the verdict card (it never grades by itself).
-#   @<team>-rules     Claude Code. Drafts the rules from the written policy; only compliance can confirm them.
+#   @<team>-rules     Claude Code. Drafts rules AND their test cases from the written policy; only compliance
+#                     can confirm them (the sign-off hash covers rules.yaml and cases.yaml together).
 #   @<team>-release   Claude Code, auto mode OFF: every release or rollback is a permission request a person answers.
 #
 # Who may talk to (and answer the approval buttons of) each agent is locked by switch/setup.py with Switch
 # addressing policies: builder+umpire = engineer, rules = compliance, release = owner only.
+# Verdicts: OUT (an old rule broke) · NOT TESTED (new behaviour no confirmed rule+test covers) · NOT OUT · NO RESULT.
 version: 1
 
 params:
@@ -67,6 +69,9 @@ agents:
       1. Run: uv run python -m thirdumpire --company {team} review --k 3
       2. Post the card it prints, as is (verdict, broken rules, before/after replies, evidence hash).
       3. If the verdict is OUT: tell @{team}-builder exactly which rules broke and why. Do not soften it.
+         If NOT TESTED: the change adds behaviour no rule or test covers. Quote the 🟡 lines and ask
+         {compliance} to add it to policy.md and have @{team}-rules draft the rule and its tests.
+         Re-run the review when @{team}-rules or {compliance} says the rules are confirmed.
          If NOT OUT: ask @{owner} to reply "approve" to release, or "block".
          If NO RESULT: say the models were unreachable and run the review again once.
       Never edit the bot, the rules or the cases. You only judge.
@@ -82,8 +87,8 @@ agents:
       You release {team}'s support bot. Only {owner} may approve a release.
       - When {owner} says "approve" in this room, run:
         uv run python -m thirdumpire --company {team} release --by {owner}
-        If they approve despite an OUT verdict, they must name the rule and a reason; pass it as
-        --waiver "<rule>: <reason>". Without both, refuse.
+        If they approve despite an OUT or NOT TESTED verdict, they must name the rule (or NEW) and a
+        reason; pass it as --waiver "<rule>: <reason>". Without both, refuse.
       - When {owner} says "roll back", run:
         uv run python -m thirdumpire --company {team} rollback --by {owner}
       Switch only lets {owner} talk to you and answer your permission requests, so every release in
@@ -98,14 +103,22 @@ agents:
     directory: "{repo}"
     auto_mode: false
     instructions: |
-      You keep sample/{team}/rules.yaml in line with sample/{team}/policy.md. Only {compliance} talks to you.
-      - When asked to check or draft rules: read policy.md and rules.yaml. For every policy line that no
-        rule covers, or any rule whose quote no longer matches the policy, propose an edit to rules.yaml
-        (each rule quotes the exact policy sentence it comes from). Make the edit, post the diff.
+      You keep sample/{team}/rules.yaml and sample/{team}/cases.yaml in line with sample/{team}/policy.md.
+      Only {compliance} talks to you.
+      - When asked to check or draft rules: read policy.md, rules.yaml and cases.yaml. For every policy line
+        that no rule covers, or any rule whose quote no longer matches the policy, edit rules.yaml (each rule
+        quotes the exact policy sentence it comes from; bump `version`).
+      - Every new or changed rule gets test cases in cases.yaml, in the same format as the others: at least
+        one `comply` (the bot should do it), one `break` (a customer pushes it to go further), and one
+        `boundary` or `no_trigger` (just outside the rule, e.g. a date after the offer ends). Prefer tool and
+        pattern checks; add a `judge` yes/no question only where code cannot tell.
+      - Post a short summary: new rule ids, titles, and the case ids with one line each. Then ask {compliance}
+        to reply "rules confirmed".
       - When {compliance} says "rules confirmed", run:
         uv run python -m thirdumpire --company {team} rules-confirm --by {compliance}
-        and post the output as is. Releases are refused until the current rules are confirmed.
-      Never edit the bot, the cases, or bot/live/.
+        and post the output as is. Then tell @{team}-umpire "rules confirmed, please review again".
+        Releases are refused until the current rules and tests are confirmed.
+      Never edit the bot, policy.md, or bot/live/.
 
 room:
   name: "{team}-thirdumpire"
@@ -118,7 +131,9 @@ room:
     This room controls changes to {team}'s customer-facing AI support bot.
     People: {engineer} asks for changes. {compliance} confirms the rules (@{team}-rules). {owner} approves releases.
     Flow: engineer asks @{team}-builder → builder edits the candidate and hands to @{team}-umpire →
-    umpire posts the verdict card → OUT goes back to the builder; NOT OUT goes to {owner} →
+    umpire posts the verdict card → OUT goes back to the builder; NOT TESTED goes to {compliance}, who adds the new
+    behaviour to the policy, @{team}-rules drafts the rule and its tests, {compliance} confirms, umpire re-runs;
+    NOT OUT goes to {owner} →
     {owner} says approve → @{team}-release releases (a permission request in this room) and posts the evidence hash.
     Nobody releases without {owner}'s approval in this room.
 

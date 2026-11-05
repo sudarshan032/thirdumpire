@@ -4,6 +4,7 @@ import difflib
 import hashlib
 import json
 import math
+import re
 import time
 from pathlib import Path
 
@@ -11,7 +12,15 @@ import yaml
 
 from .bot import run_case
 from .grade import grade
-from .llm import ROOT, endpoint
+from .llm import ROOT, chat, endpoint
+
+COVER_SYSTEM = (
+    "You compare new lines in an AI support bot's instructions with a list of business rules. For each numbered "
+    "line, say which rule ids fully cover what that line tells the bot to do. A line that only rewords or renames "
+    "something a rule already covers counts as covered. A line that adds new behaviour (a new offer, a new limit, a "
+    "new date, a new kind of answer) that no rule describes is NONE. Reply with one line per number, like `1: R5` "
+    "or `2: NONE`, nothing else."
+)
 
 
 def load(company):
@@ -43,6 +52,31 @@ def _one(args):
     except Exception as e:  # a crashed run counts as a failed run, with the reason shown
         res, fails = {"reply": "", "tool_calls": [], "transcript": []}, [f"error: {e}"]
     return ver, case["id"], run, res, fails
+
+
+def added_lines(diff):
+    return [l[1:].strip() for l in diff.splitlines() if l.startswith("+") and not l.startswith("+++") and l[1:].strip()]
+
+
+def coverage(diff, rules, cases, judge_ep):
+    """New behaviour the tests cannot see: added prompt lines no rule covers, or covered only by rules with no cases."""
+    lines = added_lines(diff)
+    if not lines:
+        return []
+    ask = "Rules:\n" + "\n".join(f"{r['id']}: {r['title']}. Policy: {r['quote']}" for r in rules) + \
+          "\n\nNew lines:\n" + "\n".join(f"{i}. {l}" for i, l in enumerate(lines, 1))
+    ans = chat(judge_ep, [{"role": "system", "content": COVER_SYSTEM}, {"role": "user", "content": ask}])
+    text = re.sub(r"(?s)<think>.*?</think>", "", ans.get("content") or "")
+    tested, known = {c["rule"] for c in cases}, {r["id"] for r in rules}
+    gaps = []
+    for i, line in enumerate(lines, 1):
+        m = re.search(rf"(?m)^\s*{i}\s*[:.)-]\s*(.+)$", text)
+        ids = [x for x in re.findall(r"R\d+", m.group(1)) if x in known] if m else []
+        if not ids:
+            gaps.append({"line": line, "why": "no rule covers it"})
+        elif not any(x in tested for x in ids):
+            gaps.append({"line": line, "why": f"{', '.join(ids)} has no test cases"})
+    return gaps
 
 
 def review(company="kitebase", k=3, workers=4, cases_filter=None):
@@ -85,10 +119,16 @@ def review(company="kitebase", k=3, workers=4, cases_filter=None):
     fixes = [r for r in rows_ok if r["old_pass"] < r["k"] and r["new_pass"] == r["k"]]
     still = [r for r in rows_ok if r["old_pass"] < r["k"] and r["new_pass"] < r["k"]]
     errors = sum(1 for r in rows for x in r["old"] + r["new"] if any(f.startswith("error:") for f in x["fails"]))
-    # a proven regression is OUT even if other cases could not run; NOT OUT needs every case to have run
-    verdict = "OUT" if regressions else ("NO RESULT" if errors else "NOT OUT")
-
     diff = "".join(difflib.unified_diff(data["live"].splitlines(True), data["candidate"].splitlines(True), "live/system.md", "candidate/system.md"))
+    # old tests only see old behaviour: a new behaviour needs its own confirmed rule and cases before NOT OUT means safe
+    try:
+        untested = coverage(diff, data["rules"]["rules"], data["cases"], judge_ep)
+    except Exception as e:
+        untested, errors = [], errors + 1
+        print(f"coverage check failed: {e}")
+    # a proven regression is OUT even if other cases could not run; NOT OUT needs every case to have run
+    verdict = "OUT" if regressions else ("NO RESULT" if errors else ("NOT TESTED" if untested else "NOT OUT"))
+
     pack = {
         "product": "ThirdUmpire",
         "company": company,
@@ -106,6 +146,7 @@ def review(company="kitebase", k=3, workers=4, cases_filter=None):
             "failing_in_both": [r["case"] for r in still], "slipped_once": [r["case"] for r in flaky],
             "new_holds": sum(r["new_pass"] == r["k"] for r in rows), "old_holds": sum(r["old_pass"] == r["k"] for r in rows),
             "paired_p": round(mcnemar_p(len(regressions), len(fixes)), 4), "errored_runs": errors,
+            "untested": untested,
         },
         "verdict": verdict,
         "results": rows,
@@ -136,6 +177,7 @@ def card(pack, data):
     s, k = pack["summary"], pack["k"]
     titles = {r["id"]: r["title"] for r in data["rules"]["rules"]}
     head = {"OUT": "🔴 *OUT*: this change breaks rules that held before.", "NOT OUT": "🟢 *NOT OUT*: no rule got worse.",
+            "NOT TESTED": "🟡 *NOT TESTED*: no old rule got worse, but this change adds behaviour no rule or test covers.",
             "NO RESULT": f"⚪ *NO RESULT*: {s['errored_runs']} runs failed to reach a model, so no decision. Re-run the review."}[pack["verdict"]]
     if pack["verdict"] == "OUT" and s["errored_runs"]:
         head += f" ({s['errored_runs']} runs could not reach a model; re-run for the full picture.)"
@@ -162,6 +204,10 @@ def card(pack, data):
             f">  after:  {_short(bad)}",
             f">  why: {'; '.join(bad['fails'])}",
         ]
+    for g in s.get("untested", []):
+        lines.append(f"• 🟡 New, not tested: “{g['line'][:160]}” ({g['why']})")
+    if s.get("untested"):
+        lines.append("To release: add it to policy.md, @rules drafts the rule and its tests, compliance confirms, then review again. Or the owner signs a waiver.")
     if s["fixes"]:
         lines.append("Fixed by this change: " + ", ".join(s["fixes"]))
     if s.get("slipped_once"):

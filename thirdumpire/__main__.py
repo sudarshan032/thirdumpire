@@ -28,8 +28,10 @@ def _latest():
     return d, json.loads((d / "evidence.json").read_text())
 
 
-def _rules_sha(rules):
-    return hashlib.sha256(json.dumps(rules["rules"], sort_keys=True).encode()).hexdigest()
+def _rules_sha(rules, company):
+    # compliance signs the rules AND their test cases: nobody can weaken a test without a new sign-off
+    cases = (ROOT / "sample" / company / "cases.yaml").read_text()
+    return hashlib.sha256((json.dumps(rules["rules"], sort_keys=True) + cases).encode()).hexdigest()
 
 
 def main(argv=None):
@@ -61,8 +63,8 @@ def main(argv=None):
         cand = (bot / "candidate/system.md").read_text()
         rules = yaml.safe_load((ROOT / "sample" / a.company / "rules.yaml").read_text())
         ok = rules.get("confirmed_by") or {}
-        if ok.get("rules_sha256") != _rules_sha(rules):
-            print("Refused: compliance has not confirmed the current rules. Ask @" + a.company + "-rules.")
+        if ok.get("rules_sha256") != _rules_sha(rules, a.company):
+            print("Refused: compliance has not confirmed the current rules and tests. Ask @" + a.company + "-rules.")
             return 2
         if hashlib.sha256(cand.encode()).hexdigest() != pack["change"]["candidate_sha256"]:
             print("Refused: the candidate changed after the last review. Run a new review first.")
@@ -73,6 +75,11 @@ def main(argv=None):
         if pack["verdict"] == "OUT" and not a.waiver:
             print("Refused: the review is OUT. Fix the change, or approve with --waiver \"<rule>: <reason>\".")
             return 2
+        if pack["verdict"] == "NOT TESTED" and not a.waiver:
+            print("Refused: the review is NOT TESTED (new behaviour with no rule or tests). Add it to the policy and "
+                  "confirm the new rule and tests, or approve with --waiver \"NEW: <reason>\".")
+            return 2
+        (bot / "history").mkdir(exist_ok=True)
         hist = sorted((bot / "history").glob("v*.md"))
         n = len(hist) + 1
         shutil.copy(bot / "live/system.md", bot / f"history/v{n}.md")
@@ -97,9 +104,10 @@ def main(argv=None):
         f = ROOT / "sample" / a.company / "rules.yaml"
         text = f.read_text()
         data = yaml.safe_load(text)
-        data["confirmed_by"] = {"by": a.by, "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "rules_sha256": _rules_sha(data)}
+        data["confirmed_by"] = {"by": a.by, "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "rules_sha256": _rules_sha(data, a.company)}
         f.write_text(text.split("rules:", 1)[0].rsplit("confirmed_by:", 1)[0] + "confirmed_by: " + json.dumps(data["confirmed_by"]) + "\nrules:" + text.split("rules:", 1)[1])
-        print(f"Rules v{data['version']} confirmed by {a.by}.")
+        n = sum(1 for _ in yaml.safe_load((ROOT / "sample" / a.company / "cases.yaml").read_text())["cases"])
+        print(f"Rules v{data['version']} ({len(data['rules'])} rules, {n} test cases) confirmed by {a.by}.")
         return 0
 
 

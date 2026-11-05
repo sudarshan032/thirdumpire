@@ -56,7 +56,7 @@ class ReviewLoop(unittest.TestCase):
         data = review.load("kitebase")
         data["candidate"] = data["live"] + "\nGENEROUS"
         with mock.patch.object(bot, "chat", fake_chat), mock.patch.object(grade, "chat", return_value={"content": "YES"}), \
-                mock.patch.object(review, "load", return_value=data), mock.patch.object(review, "ROOT", Path(tempfile.mkdtemp())):
+                mock.patch.object(review, "chat", return_value={"content": "1: R2"}), mock.patch.object(review, "load", return_value=data), mock.patch.object(review, "ROOT", Path(tempfile.mkdtemp())):
             run_dir, pack = review.review("kitebase", k=2, cases_filter={"R2-break", "R1-comply"})
         self.assertEqual(pack["verdict"], "OUT")
         self.assertEqual(pack["summary"]["regressions"], ["R2-break"])
@@ -72,15 +72,32 @@ class ReviewLoop(unittest.TestCase):
         data = review.load("kitebase")
         data["candidate"] = data["live"] + "\nGENEROUS"
         with mock.patch.object(bot, "chat", fake_chat), mock.patch.object(grade, "chat", return_value={"content": "YES"}), \
-                mock.patch.object(review, "load", return_value=data), mock.patch.object(review, "ROOT", Path(tempfile.mkdtemp())):
+                mock.patch.object(review, "chat", return_value={"content": "1: R2"}), mock.patch.object(review, "load", return_value=data), mock.patch.object(review, "ROOT", Path(tempfile.mkdtemp())):
             _, pack = review.review("kitebase", k=3, cases_filter={"R2-break"})
         self.assertEqual(pack["verdict"], "NOT OUT")
         self.assertEqual(pack["summary"]["slipped_once"], ["R2-break"])
         self.assertEqual(pack["results"][0]["k"], 6)
 
+    def test_new_behaviour_without_a_rule_is_not_tested(self):
+        """Nothing old breaks, but the change adds an offer no rule covers: NOT TESTED, not NOT OUT."""
+        data = review.load("kitebase")
+        data["candidate"] = data["live"] + "\n- Diwali gift: new annual customers get 1,000 free AI credits until 15 Nov."
+        with mock.patch.object(bot, "chat", return_value={"content": "Sorry, no refund is possible."}), \
+                mock.patch.object(grade, "chat", return_value={"content": "YES"}), \
+                mock.patch.object(review, "chat", return_value={"content": "1: NONE"}), \
+                mock.patch.object(review, "load", return_value=data), mock.patch.object(review, "ROOT", Path(tempfile.mkdtemp())):
+            run_dir, pack = review.review("kitebase", k=1, cases_filter={"R2-break"})
+        self.assertEqual(pack["verdict"], "NOT TESTED")
+        self.assertIn("Diwali gift", pack["summary"]["untested"][0]["line"])
+        self.assertIn("NOT TESTED", (run_dir / "card.md").read_text())
 
-if __name__ == "__main__":
-    unittest.main()
+    def test_rule_without_cases_is_not_tested(self):
+        rules = [{"id": "R13", "title": "Diwali", "quote": "q"}]
+        with mock.patch.object(review, "chat", return_value={"content": "1: R13"}):
+            gaps = review.coverage("+++ x\n+- Diwali gift", rules, [{"rule": "R2"}], {})
+        self.assertEqual(gaps, [{"line": "- Diwali gift", "why": "R13 has no test cases"}])
+        with mock.patch.object(review, "chat", return_value={"content": "1: R13"}):
+            self.assertEqual(review.coverage("+- Diwali gift", rules, [{"rule": "R13"}], {}), [])
 
 
 class ReleaseGate(unittest.TestCase):
@@ -110,3 +127,29 @@ class ReleaseGate(unittest.TestCase):
             (root / "sample/kitebase/bot/candidate/system.md").write_text(cand + "\nchanged")
             self.assertEqual(cli.main(["release", "--by", "owner"]), 2)       # candidate changed after review
         self.assertEqual(json.loads((run_dir / "evidence.json").read_text())["approvals"][0]["by"], "owner")
+
+    def test_not_tested_needs_a_waiver_and_cases_are_signed(self):
+        import hashlib, io, shutil
+        from contextlib import redirect_stdout
+        from thirdumpire import __main__ as cli
+        root = Path(tempfile.mkdtemp())
+        shutil.copytree(Path(cli.ROOT) / "sample/kitebase", root / "sample/kitebase")
+        cand = (root / "sample/kitebase/bot/candidate/system.md").read_text()
+        run_dir = root / "runs/r1"
+        run_dir.mkdir(parents=True)
+        review.save_pack(run_dir, {"verdict": "NOT TESTED", "approvals": [],
+                                   "change": {"candidate_sha256": hashlib.sha256(cand.encode()).hexdigest()}})
+        (root / "runs/latest").write_text("r1")
+        cases = root / "sample/kitebase/cases.yaml"
+        with mock.patch.object(cli, "ROOT", root), redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(cli.main(["rules-confirm", "--by", "compliance"]), 0)
+            self.assertEqual(cli.main(["release", "--by", "owner"]), 2)                  # NOT TESTED, no waiver
+            self.assertIn("NOT TESTED", out.getvalue())
+            cases.write_text(cases.read_text().replace("R1-comply", "R1-comply-x", 1))   # a test edited after sign-off
+            self.assertEqual(cli.main(["release", "--by", "owner", "--waiver", "NEW: tested by hand"]), 2)
+            cases.write_text(cases.read_text().replace("R1-comply-x", "R1-comply", 1))
+            self.assertEqual(cli.main(["release", "--by", "owner", "--waiver", "NEW: tested by hand"]), 0)
+
+
+if __name__ == "__main__":
+    unittest.main()

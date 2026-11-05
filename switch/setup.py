@@ -105,7 +105,7 @@ def main():
     ids = {x["name"]: x["id"] for x in gw("GET", "/agents") if x["name"] in names}
     b, u, r, rel = (ids[n] for n in names)
     gw("PUT", f"/agents/{b}/addressing-policy", policy([eng["id"]], [u]))   # engineer; umpire hands OUT back
-    gw("PUT", f"/agents/{u}/addressing-policy", policy([eng["id"]], [b]))   # engineer; builder hands over
+    gw("PUT", f"/agents/{u}/addressing-policy", policy([eng["id"]], [b, r]))   # engineer; builder and rules hand over
     gw("PUT", f"/agents/{r}/addressing-policy", policy([comp["id"]]))       # compliance only
     gw("PUT", f"/agents/{rel}/addressing-policy", policy([own["id"]]))      # owner only: releases need the owner
     print(f"Room {a.team}-thirdumpire ready. Locked: builder/umpire={a.engineer}, rules={a.compliance}, release={a.owner}.")
