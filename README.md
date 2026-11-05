@@ -8,6 +8,8 @@
 
 **Who it's for:** small teams and AI agencies that run a support or sales bot and change its prompt every week, with no ML team to check it.
 
+**How it differs:** code-review gates check *code*. Red-team tools (like Switch Trust) attack a bot with generic hostile prompts. ThirdUmpire checks the *bot's behaviour* against *this business's own written policy*, on every change, old vs new, and a named person signs off in Slack.
+
 ![Verdict card in the Slack room: 🔴 OUT, the 40% Diwali offer breaks the 20% discount rule](assets/01-out-card.png)
 
 ## Proof
@@ -20,7 +22,7 @@
 
 ## How Switch is used (remove Switch and it stops working)
 
-- **One room, four agents, three people.** The room template [`switch/thirdumpire.template.yaml`](switch/thirdumpire.template.yaml) creates the Slack channel, its instructions and four Claude Code agents: `kitebase-builder`, `kitebase-umpire`, `kitebase-rules`, `kitebase-release`.
+- **One room, four agents, three people.** The room template [`switch/thirdumpire.template.yaml`](switch/thirdumpire.template.yaml) creates the Slack channel, its instructions and four Claude Code agents: `kitebase-builder`, `kitebase-umpire`, `kitebase-rules`, `kitebase-release`. It also sets two exclusive room roles (`release-manager`, `rules-keeper`), attaches this repo as a reference, and adds a room doc explaining the verdicts.
 - **Hand-offs by name.** builder → umpire → (rules) → release, with @mentions in the thread. No agent can reach the others any other way.
 - **Roles enforced by Switch, not by a prompt.** [`switch/setup.py`](switch/setup.py) sets a Switch *addressing policy* per agent, before any agent is greeted: builder + umpire answer only the engineer, rules only compliance, release only the owner. Switch checks it for every message **and every answer to a permission request**. When the engineer pressed "Allow" on a release, Switch refused it: `NOT_AUTHORIZED: You may not address this agent, so you may not answer it`.
 - **Permission cards in Slack.** `rules` and `release` run with auto mode off, and [`.claude/settings.json`](.claude/settings.json) marks `release`, `rollback` and `rules-confirm` as *ask*, even on a machine that allows all shell commands. Each one becomes a Switch approval card in the thread that pauses the real command, recorded with the Slack handle that pressed it.
@@ -84,6 +86,19 @@ For live reviews copy `.env.example` to `.env` and add two free keys (bot on Oll
 
 Other commands: `release --by <name> [--waiver "R5: reason"]` · `rollback --by <name>` · `rules-confirm --by <name>`. Add `--recreate` to `setup.py` to rebuild the room.
 
+## For judges: check every claim in 2 minutes
+
+No keys, no Slack needed:
+
+| Claim | Command | You should see |
+|---|---|---|
+| AI-off replay of a real review | `THIRDUMPIRE_OFFLINE=1 uv run python -m thirdumpire review --k 3` | 🟡 NOT TESTED card: 40 cases × 3 runs, the Diwali gift lines flagged |
+| The gate refuses without a sign-off | `uv run python -m thirdumpire release --by you` | `Refused: compliance has not confirmed the current rules and tests.` |
+| The verdict logic is tested | `uv run python -m unittest discover -s tests -t .` | 15 tests OK (OUT, second look, NOT TESTED, partial/stale/reused reviews, tamper, rollback log) |
+| The template is valid Switch | With Switch Console running: `POST /gateway/templates/validate` with [`switch/thirdumpire.template.yaml`](switch/thirdumpire.template.yaml) | `ok: true`, no errors, no warnings |
+
+**Real vs sample:** the Slack room, the four agents, Switch's refusals and approval cards, and the model calls are real (recorded in the video and in `replay.json.gz`). The company, its policy and its customers are sample data.
+
 ## How it works
 
 1. **Rules from the policy.** [`sample/kitebase/policy.md`](sample/kitebase/policy.md) → [`rules.yaml`](sample/kitebase/rules.yaml) (each rule quotes its policy sentence) → [`cases.yaml`](sample/kitebase/cases.yaml): per rule a *comply*, *break* (customer pushes), *boundary* and *no-trigger* case, plus multi-turn and prompt-injection cases.
@@ -108,6 +123,15 @@ Kitebase is a **fictional** SaaS company (notes app), made up for this demo: a 4
 - **Tests catch only what they test** (like DRS judging only what the cameras saw). NOT TESTED narrows the gap: nothing new reaches customers untested unless a named person signs a waiver in writing. ~40 cases can't prove small regressions, and simulated customers are not real customers.
 - Text bots only today. My real bots are voice bots (EN/HI/TE); voice + Indian-language cases are next.
 - In the demo, compliance and owner are my own extra Slack accounts.
+
+## How it maps to the judging criteria
+
+| Criterion | Where to look |
+|---|---|
+| Use of Switch (30%) | Room template with 4 agents, roles, reference and doc; addressing policies set by `setup.py`; permission cards that pause the real command; agents hand off by name; wrong-person approvals refused by Switch |
+| Technical execution (25%) | Clone → `uv sync` → replay with no keys; 15 tests; evidence pack with SHA-256; a release gate that refuses partial, stale, reused or unsigned reviews |
+| Creativity and impact (25%) | A real problem from my job (87 prompt saves in 3 weeks, 58 recordings checked by hand) → about 3 minutes per change |
+| Presentation (20%) | Video above; this README; [RESULTS.md](RESULTS.md) |
 
 ## How it was built
 
