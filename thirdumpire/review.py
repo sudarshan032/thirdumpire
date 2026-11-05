@@ -49,11 +49,23 @@ def review(company="kitebase", k=3, workers=4, cases_filter=None):
     data = load(company)
     cases = [c for c in data["cases"] if not cases_filter or c["id"] in cases_filter]
     bot_ep, judge_ep = endpoint("BOT"), endpoint("JUDGE")
-    jobs = [(v, data[v], c, r, data, bot_ep, judge_ep) for v in ("live", "candidate") for c in cases for r in range(k)]
     out = {}
-    with cf.ThreadPoolExecutor(workers) as ex:
-        for ver, cid, run, res, fails in ex.map(_one, jobs):
-            out.setdefault((ver, cid), []).append({"run": run, "fails": fails, "reply": res["reply"], "tool_calls": res["tool_calls"], "transcript": res["transcript"]})
+
+    def play(cs, runs):
+        jobs = [(v, data[v], c, r, data, bot_ep, judge_ep) for v in ("live", "candidate") for c in cs for r in runs]
+        with cf.ThreadPoolExecutor(workers) as ex:
+            for ver, cid, run, res, fails in ex.map(_one, jobs):
+                out.setdefault((ver, cid), []).append({"run": run, "fails": fails, "reply": res["reply"], "tool_calls": res["tool_calls"], "transcript": res["transcript"]})
+
+    def passes(ver, cid):
+        return sum(not r["fails"] for r in out[(ver, cid)])
+
+    play(cases, range(k))
+    # second look (like a DRS replay): a case that held before but slipped in only some runs gets k more runs of
+    # both versions, so one unlucky sample cannot block a release on its own
+    wobbly = [c for c in cases if passes("live", c["id"]) == k and 0 < passes("candidate", c["id"]) < k]
+    if wobbly and k > 1:
+        play(wobbly, range(k, 2 * k))
 
     sev = {r["id"]: r["severity"] for r in data["rules"]["rules"]}
     rows = []
@@ -61,15 +73,17 @@ def review(company="kitebase", k=3, workers=4, cases_filter=None):
         old, new = out[("live", c["id"])], out[("candidate", c["id"])]
         rows.append({
             "case": c["id"], "rule": c["rule"], "kind": c["kind"], "severity": sev.get(c["rule"], "medium"),
-            "old_pass": sum(not r["fails"] for r in old), "new_pass": sum(not r["fails"] for r in new), "k": k,
+            "old_pass": passes("live", c["id"]), "new_pass": passes("candidate", c["id"]), "k": len(old),
             "old": old, "new": new,
         })
     for r in rows:
         r["errored"] = any(f.startswith("error:") for x in r["old"] + r["new"] for f in x["fails"])
     rows_ok = [r for r in rows if not r["errored"]]
-    regressions = [r for r in rows_ok if r["old_pass"] == k and r["new_pass"] < k]
-    fixes = [r for r in rows_ok if r["old_pass"] < k and r["new_pass"] == k]
-    still = [r for r in rows_ok if r["old_pass"] < k and r["new_pass"] < k]
+    # regression: held every run before, and now fails at least 2 runs (1 run when k=1)
+    regressions = [r for r in rows_ok if r["old_pass"] == r["k"] and r["k"] - r["new_pass"] >= min(2, r["k"])]
+    flaky = [r for r in rows_ok if r["old_pass"] == r["k"] and 0 < r["k"] - r["new_pass"] < min(2, r["k"])]
+    fixes = [r for r in rows_ok if r["old_pass"] < r["k"] and r["new_pass"] == r["k"]]
+    still = [r for r in rows_ok if r["old_pass"] < r["k"] and r["new_pass"] < r["k"]]
     errors = sum(1 for r in rows for x in r["old"] + r["new"] if any(f.startswith("error:") for f in x["fails"]))
     # a proven regression is OUT even if other cases could not run; NOT OUT needs every case to have run
     verdict = "OUT" if regressions else ("NO RESULT" if errors else "NOT OUT")
@@ -89,8 +103,8 @@ def review(company="kitebase", k=3, workers=4, cases_filter=None):
         "k": k,
         "summary": {
             "cases": len(rows), "regressions": [r["case"] for r in regressions], "fixes": [r["case"] for r in fixes],
-            "failing_in_both": [r["case"] for r in still],
-            "new_holds": sum(r["new_pass"] == k for r in rows), "old_holds": sum(r["old_pass"] == k for r in rows),
+            "failing_in_both": [r["case"] for r in still], "slipped_once": [r["case"] for r in flaky],
+            "new_holds": sum(r["new_pass"] == r["k"] for r in rows), "old_holds": sum(r["old_pass"] == r["k"] for r in rows),
             "paired_p": round(mcnemar_p(len(regressions), len(fixes)), 4), "errored_runs": errors,
         },
         "verdict": verdict,
@@ -135,8 +149,11 @@ def card(pack, data):
         if r["case"] in s["regressions"]:
             by_rule.setdefault(r["rule"], []).append(r)
     for rule, rs in sorted(by_rule.items()):
-        lines.append(f"• *{rule} {titles.get(rule, '')}* broke in {len(rs)} case(s): " + ", ".join(f"{r['case']} ({r['new_pass']}/{k})" for r in rs))
-    for r in [r for r in pack["results"] if r["case"] in s["regressions"]][:2]:
+        lines.append(f"• *{rule} {titles.get(rule, '')}* broke in {len(rs)} case(s): " + ", ".join(f"{r['case']} ({r['new_pass']}/{r['k']})" for r in rs))
+    rank = {"high": 0, "medium": 1, "low": 2}
+    worst = sorted((r for r in pack["results"] if r["case"] in s["regressions"]),
+                   key=lambda r: (r["new_pass"] / r["k"], rank.get(r["severity"], 1)))
+    for r in worst[:2]:
         bad = next(x for x in r["new"] if x["fails"])
         good = r["old"][0]
         lines += [
@@ -147,6 +164,8 @@ def card(pack, data):
         ]
     if s["fixes"]:
         lines.append("Fixed by this change: " + ", ".join(s["fixes"]))
+    if s.get("slipped_once"):
+        lines.append("Slipped once in " + str(2 * k) + " runs after a second look (not counted): " + ", ".join(s["slipped_once"]))
     if s["failing_in_both"]:
         lines.append("Already failing before (not caused by this change): " + ", ".join(s["failing_in_both"]))
     lines.append(f"Evidence pack sha256 `{pack['sha256'][:16]}…`")

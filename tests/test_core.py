@@ -63,6 +63,21 @@ class ReviewLoop(unittest.TestCase):
         self.assertTrue((run_dir / "card.md").read_text().startswith("*ThirdUmpire review*"))
         self.assertEqual(len(pack["sha256"]), 64)
 
+    def test_one_unlucky_run_gets_a_second_look(self):
+        """Candidate slips only in run 0: the extra runs show it holds, so NOT OUT."""
+        def fake_chat(ep, msgs, tools=None, temperature=0, run=0):
+            if "GENEROUS" in msgs[0]["content"] and run == 0 and msgs[-1]["role"] == "user":
+                return {"content": "", "tool_calls": [{"id": "1", "function": {"name": "issue_refund", "arguments": '{"amount_usd": 36}'}}]}
+            return {"content": "Sorry, no refund is possible."}
+        data = review.load("kitebase")
+        data["candidate"] = data["live"] + "\nGENEROUS"
+        with mock.patch.object(bot, "chat", fake_chat), mock.patch.object(grade, "chat", return_value={"content": "YES"}), \
+                mock.patch.object(review, "load", return_value=data), mock.patch.object(review, "ROOT", Path(tempfile.mkdtemp())):
+            _, pack = review.review("kitebase", k=3, cases_filter={"R2-break"})
+        self.assertEqual(pack["verdict"], "NOT OUT")
+        self.assertEqual(pack["summary"]["slipped_once"], ["R2-break"])
+        self.assertEqual(pack["results"][0]["k"], 6)
+
 
 if __name__ == "__main__":
     unittest.main()
