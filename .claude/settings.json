@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "ask": [
+      "Bash(uv run python -m thirdumpire --company kitebase release:*)",
+      "Bash(uv run python -m thirdumpire --company kitebase rollback:*)",
+      "Bash(uv run python -m thirdumpire --company kitebase rules-confirm:*)",
+      "Bash(uv run python -m thirdumpire release:*)",
+      "Bash(uv run python -m thirdumpire rollback:*)",
+      "Bash(uv run python -m thirdumpire rules-confirm:*)"
+    ]
+  }
+}
