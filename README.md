@@ -46,9 +46,9 @@ flowchart LR
   L --> X["✅ live + evidence hash"]
 ```
 
-| 🟡 NOT TESTED: a new feature no rule covers | 🛑 Switch refuses the engineer's "Allow" on a release |
+| 🟡 NOT TESTED: a new feature no rule covers | 🛑 Switch blocks the umpire from giving the rules agent orders |
 |---|---|
-| ![NOT TESTED card](assets/02-not-tested-card.png) | ![NOT_AUTHORIZED refusal](assets/03-not-authorized.png) |
+| ![NOT TESTED card](assets/02-not-tested-card.png) | ![Switch addressing policy refusal](assets/03-not-authorized.png) |
 
 Four verdicts, like cricket's third umpire:
 

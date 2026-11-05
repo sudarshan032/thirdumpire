@@ -13,3 +13,7 @@ runs/2026*/
 runs/latest
 *.egg-info/
 docs/submission/clips/
+
+# demo video build: generated voice, licensed music/sfx and fonts stay local
+docs/submission/video/audio/
+docs/submission/video/assets/
