@@ -4,7 +4,7 @@
 
 ![Track 01: Best Business Workflow](https://img.shields.io/badge/Track_01-Best_Business_Workflow-0a7) ![Chat: Slack](https://img.shields.io/badge/chat-Slack-4A154B) ![Built on Switch](https://img.shields.io/badge/built_on-Switch-111) ![Agents: Claude Code](https://img.shields.io/badge/agents-4×_Claude_Code-d97757) ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
 
-**[▶ Demo video (2.5 min)](https://youtu.be/QEaQAfJnDA8)** · Flip the Switch (WeMakeDevs × Switch) · [Results](RESULTS.md)
+**[▶ Demo video (2.5 min)](https://youtu.be/QEaQAfJnDA8)** · Flip the Switch (WeMakeDevs × Switch) · [Results](RESULTS.md) · [Blog](https://dev.to/sudarshan032/drs-for-your-ai-making-a-support-bot-wait-for-a-person-before-it-changes-switch-slack-36pc)
 
 **Who it's for:** small teams and AI agencies that run a support or sales bot and change its prompt every week, with no ML team to check it.
 
